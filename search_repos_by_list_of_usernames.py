@@ -4,11 +4,13 @@ import logging
 import dotenv
 import os
 
+
 dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 GITHUB_ACCESS_TOKEN = os.environ.get('GITHUB_ACCESS_TOKEN')
 headers = {'Authorization': f'Bearer {GITHUB_ACCESS_TOKEN}'}
+SUSPICIOUS_THRESHOLD = 10  # threshold of 10%
 
 def get_repositories(username):
     try:
@@ -76,27 +78,54 @@ def find_common_join_dates(username):
     logging.info("Fetching repositories...")
     repos = get_repositories(username)
 
-    all_stargazers_details = defaultdict(list)
+    suspicious_repos = []
 
     for repo in repos:
         logging.info(f"Processing repository: {repo['name']}")
+
+        all_stargazers_details = defaultdict(list)
+        total_stargazers = 0
+        total_similar_users = 0
+
         if repo['stargazers_count'] > 40:
             stargazers = get_stargazers(username, repo["name"])
+            total_stargazers = len(stargazers)
 
             for user in stargazers:
                 user_details = get_user_details(user["login"])
                 all_stargazers_details[user_details["created_at"]].append(user_details)
 
-    logging.info("Correlating data...")
-    for join_date, details_list in all_stargazers_details.items():
-        if len(details_list) > 5:
-            similar_users = [details for details in details_list if all(details.values())]
+        print(f"Repo name: {repo['name']}")
+        print("-----------------------------")
 
-            if similar_users:
-                print(f"Join Date: {join_date}")
-                print(f"Total Users: {len(details_list)}")
-                print(f"Similar Users: {len(similar_users)}")
-                print("-----------------------------")
+        for join_date, details_list in all_stargazers_details.items():
+            similar_users = [details for details in details_list if all(details.values())]
+            total_similar_users += len(similar_users)
+
+            if len(details_list) > 5:
+                if similar_users:
+                    print(f"Join Date: {join_date}")
+                    print(f"Total Users: {len(details_list)}")
+                    print(f"Similar Users: {len(similar_users)}")
+                    print("-----------------------------")
+
+
+        if total_stargazers > 0:
+            similar_percentage = (total_similar_users / total_stargazers) * 100
+            print(f"Percentage of Similar Users: {similar_percentage:.2f}%")
+
+            if similar_percentage > SUSPICIOUS_THRESHOLD:
+                print(f"⚠️ Repository {repo['name']} is suspicious of fake stars!")
+                suspicious_repos.append(repo['name'])
+
+        print("\n")
+
+    if suspicious_repos:
+        print("Suspicious Repositories (potential fake stars):")
+        for repo_name in suspicious_repos:
+            print(f"- {repo_name}")
+    else:
+        print("No repositories found to be suspicious of fake stars.")
 
 
 def main():
