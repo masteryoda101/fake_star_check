@@ -1,14 +1,19 @@
 import requests
 from collections import defaultdict
 import logging
+import dotenv
+import os
 
+dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+GITHUB_ACCESS_TOKEN = os.environ.get('GITHUB_ACCESS_TOKEN')
+headers = {'Authorization': f'Bearer {GITHUB_ACCESS_TOKEN}'}
 
 def get_repositories(username):
     try:
         url = f"https://api.github.com/users/{username}/repos"
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         return response.json()
     except requests.RequestException as e:
         logging.error(f"Error fetching repositories for {username}. Error: {e}")
@@ -16,19 +21,37 @@ def get_repositories(username):
 
 
 def get_stargazers(owner, repo):
-    try:
-        url = f"https://api.github.com/repos/{owner}/{repo}/stargazers"
-        response = requests.get(url)
-        return response.json()
-    except requests.RequestException as e:
-        logging.error(f"Error fetching stargazers for {owner}. Error: {e}")
-        return []
+    stargazers = []
+    page = 1
+
+    while True:
+        try:
+            url = f"https://api.github.com/repos/{owner}/{repo}/stargazers?page={page}&per_page=100"
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+            if not data:
+                break
+
+            stargazers.extend(data)
+
+            link_header = response.headers.get('Link', '')
+            if 'rel="next"' not in link_header:  # Check if there's a next page
+                break
+
+            page += 1
+        except requests.RequestException as e:
+            logging.error(f"Error fetching stargazers for {owner}/{repo} on page {page}. Error: {e}")
+            break
+
+    return stargazers
 
 
 def get_user_details(username):
     try:
         url = f"https://api.github.com/users/{username}"
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         user_data = response.json()
 
         details = {
