@@ -46,7 +46,7 @@ running = True
 
 SUPPORTED_VCS_HOSTNAMES = 'github.com'
 
-SUSPICIOUS_THRESHOLD = 10  # in percentages.
+SUSPICIOUS_THRESHOLD = 15  # in percentages.
 
 
 def identify_commonly_starred_repositories(similar_users_logins):
@@ -153,7 +153,7 @@ def is_repo_suspicious(repo):
 
         redis_session.set(f'dustico:repocheck:gitrepos:{repo}', '', ex=common.ONE_DAY_SECONDS * 30)
 
-        print(f"Processing repository: {repo_name}")
+        print(f"Processing repository: {repo}")
 
         repo_details = fetch_repository_details(owner, repo_name)
         stargazers_count = repo_details.get('stargazers_count', 0)
@@ -171,7 +171,7 @@ def is_repo_suspicious(repo):
                 user_details = fetch_user_profile_details(user_login)
                 all_stargazers_details[user_login] = user_details
 
-            suspicious_logger.info(f"Repo name: {repo_name}")
+            suspicious_logger.info(f"Repo name: {repo}")
             suspicious_logger.info("-----------------------------")
 
             grouped_by_join_date = defaultdict(list)
@@ -186,14 +186,13 @@ def is_repo_suspicious(repo):
                     if similar_users:
                         suspicious_logger.info(f"Join Date: {join_date}")
                         suspicious_logger.info(f"Total Users: {len(details_list)}")
-                        suspicious_logger.info(f"Similar Users: {len(similar_users)}")
-                        suspicious_logger.info("\n")
+                        suspicious_logger.info(f"Similar Users: {len(similar_users)} \n\n")
             if total_stargazers > 0:
                 similar_percentage = (total_similar_users / total_stargazers) * 100
                 suspicious_logger.info(f"Percentage of Similar Users: {similar_percentage:.2f}%")
 
                 if similar_percentage > SUSPICIOUS_THRESHOLD:
-                    suspicious_logger.info(f"⚠️ Repository {repo_name} is over threshold of similar stargazers!")
+                    suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers!\n")
 
                     similar_users_details = []
                     for user in stargazers:
@@ -212,9 +211,11 @@ def is_repo_suspicious(repo):
                     suspicious_logger.info("-----------------------------")
                     suspicious_logger.info("\n")
 
-                    print(f"- {repo_name} - Suspicious Repository (potential fake stars)")
+                    print(f"- {repo} - Suspicious Repository (potential fake stars)")
                 else:
                     print(f"{repo}: Not found to be suspicious of fake stars.")
+            else:
+                print(f"{repo}: Not found to be suspicious of fake stars.")
 
 
 def process_new_pypi_packages():
