@@ -28,6 +28,7 @@ general_logger.addHandler(general_handler)
 
 dotenv.load_dotenv()
 
+
 #logging.basicConfig(filename='SuspiciousReposLog.txt', level=logging.INFO, format='%(message)s')
 #common.init_logging('log.txt', file_level=logging.DEBUG, stdout_level=logging.INFO)
 
@@ -182,7 +183,7 @@ def is_repo_suspicious(repo):
                 similar_users = [details for details in details_list if all(details.values())]
                 total_similar_users += len(similar_users)
 
-                if len(details_list) > 5:
+                if len(details_list) > 1:
                     if similar_users:
                         suspicious_logger.info(f"Join Date: {join_date}")
                         suspicious_logger.info(f"Total Users: {len(details_list)}")
@@ -292,7 +293,7 @@ def main():
     while True:
         time.sleep(1)
 
-    """ For testing purposes"""
+    """For testing purposes"""
     #repo = "stackgpu/Simple-GPU"
     #is_repo_suspicious(repo)
 
