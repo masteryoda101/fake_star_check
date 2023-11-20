@@ -17,10 +17,6 @@ The script uses several criteria to determine if a repository's star activity is
 - A high percentage of stars from users with profiles indicating minimal GitHub activity (e.g., fewer than 2 repositories, fewer than 2 followers).
 - Configurable thresholds for the percentage of stars within the time window and the percentage of similar users that flag a repository as suspicious.
 
-## Usage
-1. Set the required environment variables, including the GitHub Access Token.
-2. Run the script with a list of GitHub repositories to analyze.
-
 
 ## Setup and Execution
 1. Install the required Python packages.
