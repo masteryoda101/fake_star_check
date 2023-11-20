@@ -2,15 +2,8 @@ import requests
 from collections import defaultdict, Counter
 import os
 import dotenv
-import redis
-from bifrost import common, package_utils
-from bifrost import library_utils, url_utils, git_utils
 import datetime
-from threading import Thread
-import time
 import logging
-import queue
-from prometheus_client import  Gauge, Counter
 
 suspicious_logger = logging.getLogger('SuspiciousRepos')
 suspicious_logger.setLevel(logging.INFO)
@@ -26,28 +19,17 @@ general_formatter = logging.Formatter('%(message)s')
 general_handler.setFormatter(general_formatter)
 general_logger.addHandler(general_handler)
 
+
 dotenv.load_dotenv()
 
 
-#logging.basicConfig(filename='SuspiciousReposLog.txt', level=logging.INFO, format='%(message)s')
-#common.init_logging('log.txt', file_level=logging.DEBUG, stdout_level=logging.INFO)
-
-REDIS_HOST = common.read_environment_variable('REDIS_HOST', default='localhost')
-redis_session = redis.Redis(host=REDIS_HOST, encoding="utf-8", decode_responses=True, socket_connect_timeout=1)
-
-LIBRARY_TOKEN = common.read_environment_variable('LIBRARY_TOKEN')
-library_client = library_utils.LibraryClient(LIBRARY_TOKEN)
 GITHUB_ACCESS_TOKEN = os.environ.get('GITHUB_ACCESS_TOKEN')
 headers = {'Authorization': f'Bearer {GITHUB_ACCESS_TOKEN}'}
 
-PACKAGE_GAUGE_COUNTER = Gauge('packages_pending_scanning', 'Counter of packages that are pending to be scanned')
-THREADS_COUNTER = Counter('static_threads_count', 'Counts number of analysis worker threads')
-packages_queue = queue.Queue()
-running = True
-
-SUPPORTED_VCS_HOSTNAMES = 'github.com'
-
-SUSPICIOUS_THRESHOLD = 15  # in percentages.
+# Variables to change:
+SIMILAR_USERS_SUSPICIOUS_PERCENTAGE = 20  # in percentages
+SUSPICIOUS_STAR_PERCENTAGE = 0.7  # 70% threshold
+SUSPICIOUS_TIME_WINDOW_HOURS = 12
 
 
 def identify_commonly_starred_repositories(similar_users_logins):
@@ -69,8 +51,9 @@ def fetch_repositories_starred_by_user(username):
     try:
         url = f"https://api.github.com/users/{username}/starred"
         response = requests.get(url, headers=headers)
-        return [repo["full_name"] for repo in response.json()]
-    except requests.RequestException as e:
+        repos = response.json()
+        return [repo["full_name"] for repo in repos]
+    except Exception as e:
         general_logger.info(f"Error fetching starred repos for {username}. Error: {e}")
         return []
 
@@ -101,13 +84,14 @@ def fetch_stargazers_for_repository(owner, repo):
     while True:
         try:
             url = f"https://api.github.com/repos/{owner}/{repo}/stargazers?page={page}&per_page=100"
+            headers['Accept'] = 'application/vnd.github.v3.star+json'
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()
             if not data:
                 break
 
-            stargazers.extend(data)
+            stargazers.extend([(user["user"]["login"], user["starred_at"]) for user in data])
 
             link_header = response.headers.get('Link', '')
             if 'rel="next"' not in link_header:
@@ -119,6 +103,41 @@ def fetch_stargazers_for_repository(owner, repo):
             break
 
     return stargazers
+
+
+def analyze_star_patterns(repo, stargazers):
+    if not stargazers:
+        return False
+    
+    starTimestamps = sorted([datetime.datetime.fromisoformat(star[1].rstrip('Z')) for star in stargazers])
+    first_star_time = starTimestamps[0]
+    last_star_time = starTimestamps[-1]
+
+    time_window = datetime.timedelta(hours=SUSPICIOUS_TIME_WINDOW_HOURS)
+    max_stars_in_time_window = 0
+    total_stars = len(starTimestamps)
+
+    for i in range(total_stars):
+        current_time = starTimestamps[i]
+        window_end_time = current_time + time_window
+        count_in_window = sum(1 for time in starTimestamps if current_time <= time <= window_end_time)
+        if count_in_window > max_stars_in_time_window:
+            max_stars_in_time_window = count_in_window
+
+    percentage_of_stars_in_window = (max_stars_in_time_window / total_stars) * 100
+
+    suspicious_logger.info(f"Total Stars: {total_stars}")
+    suspicious_logger.info(f"Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {max_stars_in_time_window}")
+    suspicious_logger.info(f"Percentage of Total Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {percentage_of_stars_in_window:.2f}%")
+
+
+    if max_stars_in_time_window > total_stars * SUSPICIOUS_STAR_PERCENTAGE:
+        threshold_percentage = SUSPICIOUS_STAR_PERCENTAGE * 100
+        suspicious_logger.info(f"⚠️ Repository {repo} shows suspicious star activity, where over {threshold_percentage}% of stars were given within 12 hours!\n")
+        return True
+    else:
+        suspicious_logger.info(f"✅ Repository {repo} does not show suspicious star activity.\n")
+        return False
 
 
 def fetch_user_profile_details(username):
@@ -147,155 +166,96 @@ def fetch_user_profile_details(username):
 
 
 def is_repo_suspicious(repo):
-        owner, repo_name = repo.split('/')
 
-        if redis_session.exists(f'dustico:repocheck:gitrepos:{repo}'):
-            return
+    suspicious_logger.info(f"Repo name: {repo}")
+    suspicious_logger.info("-----------------------------")
 
-        redis_session.set(f'dustico:repocheck:gitrepos:{repo}', '', ex=common.ONE_DAY_SECONDS * 30)
+    owner, repo_name = repo.split('/')
 
-        print(f"Processing repository: {repo}")
+    print(f"Processing repository: {repo}")
 
-        repo_details = fetch_repository_details(owner, repo_name)
-        stargazers_count = repo_details.get('stargazers_count', 0)
+    repo_details = fetch_repository_details(owner, repo_name)
+    stargazers_count = repo_details.get('stargazers_count', 0)
 
-        all_stargazers_details = {}
-        total_stargazers = 0
-        total_similar_users = 0
+    all_stargazers_details = {}
+    total_similar_users = 0
 
-        if stargazers_count > 40:
-            stargazers = fetch_stargazers_for_repository(owner, repo_name)
-            total_stargazers = len(stargazers)
+    if stargazers_count > 150:
+        stargazers = fetch_stargazers_for_repository(owner, repo_name)
+        total_stargazers = len(stargazers)
+        if analyze_star_patterns(repo_name, stargazers):
+            suspicious_logger.info(f"⚠️ Repository {repo_name} shows suspicious star activity!")
 
-            for user in stargazers:
-                user_login = user["login"]
-                user_details = fetch_user_profile_details(user_login)
-                all_stargazers_details[user_login] = user_details
+        for user_login, starred_at in stargazers:
+            user_details = fetch_user_profile_details(user_login)
+            all_stargazers_details[user_login] = user_details
 
-            suspicious_logger.info(f"Repo name: {repo}")
-            suspicious_logger.info("-----------------------------")
+        grouped_by_join_date = defaultdict(list)
+        for user_login, details in all_stargazers_details.items():
+            grouped_by_join_date[details["created_at"]].append(details)
 
-            grouped_by_join_date = defaultdict(list)
-            for user_login, details in all_stargazers_details.items():
-                grouped_by_join_date[details["created_at"]].append(details)
+        for join_date, details_list in grouped_by_join_date.items():
+            similar_users = [details for details in details_list if all(details.values())]
+            total_similar_users += len(similar_users)
 
-            for join_date, details_list in grouped_by_join_date.items():
-                similar_users = [details for details in details_list if all(details.values())]
-                total_similar_users += len(similar_users)
+            if len(details_list) > 1:
+                if similar_users:
+                    general_logger.info(f"Join Date: {join_date}")
+                    general_logger.info(f"Total Users: {len(details_list)}")
+                    general_logger.info(f"Similar Users: {len(similar_users)} \n\n")
+        if total_stargazers > 0:
+            similar_percentage = (total_similar_users / total_stargazers) * 100
+            suspicious_logger.info(f"Percentage of Similar Users: {similar_percentage:.2f}%")
 
-                if len(details_list) > 1:
-                    if similar_users:
-                        suspicious_logger.info(f"Join Date: {join_date}")
-                        suspicious_logger.info(f"Total Users: {len(details_list)}")
-                        suspicious_logger.info(f"Similar Users: {len(similar_users)} \n\n")
-            if total_stargazers > 0:
-                similar_percentage = (total_similar_users / total_stargazers) * 100
-                suspicious_logger.info(f"Percentage of Similar Users: {similar_percentage:.2f}%")
+            if similar_percentage > SIMILAR_USERS_SUSPICIOUS_PERCENTAGE:
+                suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers!\n")
 
-                if similar_percentage > SUSPICIOUS_THRESHOLD:
-                    suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers!\n")
+                similar_users_details = []
+                for user_login, starred_at in stargazers:
+                    user_details = fetch_user_profile_details(user_login)
+                    all_stargazers_details[user_login] = user_details
 
-                    similar_users_details = []
-                    for user in stargazers:
-                        for details in all_stargazers_details.values():
-                            if details["login"] == user["login"] and all(details.values()):
-                                similar_users_details.append(details)
+                for user_login in stargazers:
+                    for details in all_stargazers_details.values():
+                        if details["login"] == user_login and all(details.values()):
+                            similar_users_details.append(details)
 
-                    similar_users_logins = [login for login, details in all_stargazers_details.items() if all(details.values())]
-                    similar_users_count = len(similar_users_details)
-                    commonly_starred_repos = identify_commonly_starred_repositories(similar_users_logins)
-                    if commonly_starred_repos:
-                        suspicious_logger.info("\nCommonly starred repositories among similar users:\n")
-                        for repo, count in commonly_starred_repos.items():
-                            percentage_starred = (count / similar_users_count) * 100
-                            suspicious_logger.info(f"{repo} starred by {count} similar users ({percentage_starred:.2f}% of similar users)")
-                    suspicious_logger.info("-----------------------------")
-                    suspicious_logger.info("\n")
+                similar_users_logins = [login for login, details in all_stargazers_details.items() if all(details.values())]
+                similar_users_count = len(similar_users_details)
+                commonly_starred_repos = identify_commonly_starred_repositories(similar_users_logins)
+                if commonly_starred_repos:
+                    suspicious_logger.info("\nCommonly starred repositories among similar users:\n")
+                    for repo, count in commonly_starred_repos.items():
+                        percentage_starred = (count / similar_users_count) * 100
+                        suspicious_logger.info(f"{repo} starred by {count} similar users ({percentage_starred:.2f}% of similar users)")
+                suspicious_logger.info("-----------------------------")
+                suspicious_logger.info("\n")
 
-                    print(f"- {repo} - Suspicious Repository (potential fake stars)")
-                else:
-                    print(f"{repo}: Not found to be suspicious of fake stars.")
+                print(f"- {repo} - Suspicious Repository (potential fake stars)")
             else:
-                print(f"{repo}: Not found to be suspicious of fake stars.")
+                suspicious_logger.info(f"✅ Repository {repo} does not have an unusual percentage of similar stargazers.\n")
+        else:
+            suspicious_logger.info(f"✅ Repository {repo} does not have an unusual percentage of similar stargazers.\n")
 
 
-def process_new_pypi_packages():
-    while running:
-        try:
-            from_timestamp = int(datetime.datetime.now().timestamp() * 1000)
-            for package in library_client.stream_new_packages(package_types=['pypi'], polling_interval_seconds=60, page_size=1000, from_timestamp=from_timestamp):
-                print(package['name'])
-                package_name = package['name']
-                package_type = package['type']
-                package_id = f'{package_type}-{package_name}'.lower()
-
-                if redis_session.exists(f'dustico:repocheck:packages:{package_id}'):
-                    continue
-
-                redis_session.set(f'dustico:repocheck:packages:{package_id}', '', ex=common.ONE_DAY_SECONDS * 30)
-
-                packages_queue.put(package)
-        except:
-            general_logger.info('error handling new pypi package releases')
-
-        finally:
-            time.sleep(30)
-
-
-def pypi_get_package_git_url(package_json):
-    project_urls = package_json.get('info', {}).get('project_urls', {})
-    if not project_urls:
-        return
-
-    for key in ['Source', 'Source Code', 'Homepage', 'Download']:
-        url = project_urls.get(key)
-        if not url:
-            continue
-
-        hostname = url_utils.get_hostname(url)
-        if hostname not in SUPPORTED_VCS_HOSTNAMES:
-            continue
-
-        url = git_utils.normalize_git_repository_url(url, raise_on_failure=False)
-        if not url:
-            continue
-
-        return url
-
-
-def packages_queue_worker():
-    while running:
-        try:
-            package = packages_queue.get()
-            package_name = package['name']
-            package_version = package['version']
-            package_data = package_utils.pypi_get_package_raw_data(package_name, package_version)
-            package_repo_link = pypi_get_package_git_url(package_data)
-            if package_repo_link != None:
-                repo = package_repo_link.split("github.com/")[1]
-                print(f'\n{package_name} - repo: {package_repo_link}')
-                is_repo_suspicious(repo)
-        except Exception as e:
-            general_logger.info(f'unexpected error handling packages queue \n {e}')
-        finally:
-            PACKAGE_GAUGE_COUNTER.dec()
-            packages_queue.task_done()
+def get_list_of_repos(filename):
+    try:
+        with open(filename, 'r') as file:
+            names = file.readlines()
+        names = [name.strip() for name in names]
+        print(names)
+        return names
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
 
 
 def main():
 
-    Thread(target=process_new_pypi_packages, daemon=True).start()
+    repos_to_check = get_list_of_repos('repo_links_list.txt')
+    for repo_name in repos_to_check:
+        is_repo_suspicious(repo_name)
 
-    worker_threads = 10
-    for _ in range(worker_threads):
-        Thread(target=packages_queue_worker, daemon=True).start()
-
-    while True:
-        time.sleep(1)
-
-    """For testing purposes"""
-    #repo = "stackgpu/Simple-GPU"
-    #is_repo_suspicious(repo)
 
 if __name__ == '__main__':
     main()
