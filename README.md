@@ -8,15 +8,6 @@ The script performs a detailed analysis of GitHub repositories based on various 
 
 1. **Star Time Analysis**: Analyzes the time pattern of stars received by a repository to detect if a significant number of them were given within a short time frame, which might indicate artificial boosting.
 2. **User Profile Analysis**: Assesses the profiles of users who starred the repository. 
-3. **Repository Star Count**: Evaluates repositories based on their total star count and the pattern of receiving these stars.
-
-## Criteria for Suspicion
-The script uses several criteria to determine if a repository's star activity is suspicious:
-
-- A large number of stars received within a short, configurable time window (default is 12 hours).
-- A high percentage of stars from users with profiles indicating minimal GitHub activity (e.g., fewer than 2 repositories, fewer than 2 followers).
-- Configurable thresholds for the percentage of stars within the time window and the percentage of similar users that flag a repository as suspicious.
-
 
 ## Setup and Execution
 1. Install the required Python packages.
