@@ -19,9 +19,7 @@ general_formatter = logging.Formatter('%(message)s')
 general_handler.setFormatter(general_formatter)
 general_logger.addHandler(general_handler)
 
-
 dotenv.load_dotenv()
-
 
 GITHUB_ACCESS_TOKEN = os.environ.get('GITHUB_ACCESS_TOKEN')
 headers = {'Authorization': f'Bearer {GITHUB_ACCESS_TOKEN}'}
@@ -108,10 +106,10 @@ def fetch_stargazers_for_repository(owner, repo):
 def analyze_star_patterns(repo, stargazers):
     if not stargazers:
         return False
-    
+
     starTimestamps = sorted([datetime.datetime.fromisoformat(star[1].rstrip('Z')) for star in stargazers])
-    first_star_time = starTimestamps[0]
-    last_star_time = starTimestamps[-1]
+    # first_star_time = starTimestamps[0]  # uncomment if you want to know the differance between first and last star
+    # last_star_time = starTimestamps[-1]
 
     time_window = datetime.timedelta(hours=SUSPICIOUS_TIME_WINDOW_HOURS)
     max_stars_in_time_window = 0
@@ -129,15 +127,11 @@ def analyze_star_patterns(repo, stargazers):
     suspicious_logger.info(f"Total Stars: {total_stars}")
     suspicious_logger.info(f"Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {max_stars_in_time_window}")
     suspicious_logger.info(f"Percentage of Total Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {percentage_of_stars_in_window:.2f}%")
-
-
-    if max_stars_in_time_window > total_stars * SUSPICIOUS_STAR_PERCENTAGE:
-        threshold_percentage = SUSPICIOUS_STAR_PERCENTAGE * 100
-        suspicious_logger.info(f"⚠️ Repository {repo} shows suspicious star activity, where over {threshold_percentage}% of stars were given within 12 hours!\n")
-        return True
+    threshold_percentage = SUSPICIOUS_STAR_PERCENTAGE * 100
+    if max_stars_in_time_window > total_stars * SUSPICIOUS_STAR_PERCENTAGE:       
+        return True, threshold_percentage
     else:
-        suspicious_logger.info(f"✅ Repository {repo} does not show suspicious star activity.\n")
-        return False
+        return False, threshold_percentage
 
 
 def fetch_user_profile_details(username):
@@ -166,6 +160,10 @@ def fetch_user_profile_details(username):
 
 
 def is_repo_suspicious(repo):
+    general_logger.info(f"additional_similar_user_stats for repo: {repo}")
+    similar_users_details = []
+    all_stargazers_details = {}
+    total_similar_users = 0
 
     suspicious_logger.info(f"Repo name: {repo}")
     suspicious_logger.info("-----------------------------")
@@ -177,14 +175,14 @@ def is_repo_suspicious(repo):
     repo_details = fetch_repository_details(owner, repo_name)
     stargazers_count = repo_details.get('stargazers_count', 0)
 
-    all_stargazers_details = {}
-    total_similar_users = 0
-
     if stargazers_count > 150:
         stargazers = fetch_stargazers_for_repository(owner, repo_name)
         total_stargazers = len(stargazers)
-        if analyze_star_patterns(repo_name, stargazers):
-            suspicious_logger.info(f"⚠️ Repository {repo_name} shows suspicious star activity!")
+        suspicious, threshold_percentage = analyze_star_patterns(repo_name, stargazers)
+        if suspicious:
+            suspicious_logger.info(f"⚠️ Repository {repo} failed check 1 of 2 for suspicious star activity, where over {threshold_percentage}% of stars were given within a 12 hour period!\n")
+        else:
+            suspicious_logger.info(f"✅ Repository {repo} passed check 1 of 2 for suspicious stars activity, where less than {threshold_percentage}% of stars were given within a 12 hour period!\n")
 
         for user_login, starred_at in stargazers:
             user_details = fetch_user_profile_details(user_login)
@@ -208,12 +206,7 @@ def is_repo_suspicious(repo):
             suspicious_logger.info(f"Percentage of Similar Users: {similar_percentage:.2f}%")
 
             if similar_percentage > SIMILAR_USERS_SUSPICIOUS_PERCENTAGE:
-                suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers!\n")
-
-                similar_users_details = []
-                for user_login, starred_at in stargazers:
-                    user_details = fetch_user_profile_details(user_login)
-                    all_stargazers_details[user_login] = user_details
+                suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers and is suspicious of fake stars!\n")
 
                 for user_login in stargazers:
                     for details in all_stargazers_details.values():
@@ -224,12 +217,12 @@ def is_repo_suspicious(repo):
                 similar_users_count = len(similar_users_details)
                 commonly_starred_repos = identify_commonly_starred_repositories(similar_users_logins)
                 if commonly_starred_repos:
-                    suspicious_logger.info("\nCommonly starred repositories among similar users:\n")
+                    general_logger.info("\nCommonly starred repositories among similar users:\n")
                     for repo, count in commonly_starred_repos.items():
                         percentage_starred = (count / similar_users_count) * 100
-                        suspicious_logger.info(f"{repo} starred by {count} similar users ({percentage_starred:.2f}% of similar users)")
-                suspicious_logger.info("-----------------------------")
-                suspicious_logger.info("\n")
+                        general_logger.info(f"{repo} starred by {count} similar users ({percentage_starred:.2f}% of similar users)")
+                general_logger.info("-----------------------------")
+                general_logger.info("\n")
 
                 print(f"- {repo} - Suspicious Repository (potential fake stars)")
             else:
@@ -251,7 +244,6 @@ def get_list_of_repos(filename):
 
 
 def main():
-
     repos_to_check = get_list_of_repos('repo_links_list.txt')
     for repo_name in repos_to_check:
         is_repo_suspicious(repo_name)
