@@ -128,7 +128,7 @@ def analyze_star_patterns(repo, stargazers):
     suspicious_logger.info(f"Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {max_stars_in_time_window}")
     suspicious_logger.info(f"Percentage of Total Stars within {SUSPICIOUS_TIME_WINDOW_HOURS} hours: {percentage_of_stars_in_window:.2f}%")
     threshold_percentage = SUSPICIOUS_STAR_PERCENTAGE * 100
-    if max_stars_in_time_window > total_stars * SUSPICIOUS_STAR_PERCENTAGE:       
+    if max_stars_in_time_window > total_stars * SUSPICIOUS_STAR_PERCENTAGE:
         return True, threshold_percentage
     else:
         return False, threshold_percentage
@@ -206,7 +206,7 @@ def is_repo_suspicious(repo):
             suspicious_logger.info(f"Percentage of Similar Users: {similar_percentage:.2f}%")
 
             if similar_percentage > SIMILAR_USERS_SUSPICIOUS_PERCENTAGE:
-                suspicious_logger.info(f"⚠️ Repository {repo} is over threshold of similar stargazers and is suspicious of fake stars!\n")
+                suspicious_logger.info(f"⚠️ Repository {repo} failed check 2 of 2 for suspicious star activity, where {similar_percentage:.2f}% of stargazers are similar to each other\n")
 
                 for user_login in stargazers:
                     for details in all_stargazers_details.values():
@@ -226,9 +226,9 @@ def is_repo_suspicious(repo):
 
                 print(f"- {repo} - Suspicious Repository (potential fake stars)")
             else:
-                suspicious_logger.info(f"✅ Repository {repo} does not have an unusual percentage of similar stargazers.\n")
+                suspicious_logger.info(f"✅ Repository {repo} passed check 2 of 2 for suspicious star activity, and does not have an unusual percentage of similar stargazers.\n")
         else:
-            suspicious_logger.info(f"✅ Repository {repo} does not have an unusual percentage of similar stargazers.\n")
+            suspicious_logger.info(f"✅ Repository {repo} passed check 2 of 2 for suspicious star activity, and does not have an unusual percentage of similar stargazers.\n")
 
 
 def get_list_of_repos(filename):
