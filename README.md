@@ -1,4 +1,4 @@
-# GitHub Repository Star Analysis
+# GitHub Repository Fake Star Analyzer
 
 ## Overview
 This Python script analyzes GitHub repositories to identify suspicious stargazing activities. It focuses on detecting repositories that might have artificially inflated their star counts, potentially indicating inauthentic popularity.
