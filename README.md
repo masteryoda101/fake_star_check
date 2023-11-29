@@ -15,9 +15,12 @@ The script offers a comprehensive analysis of GitHub repositories, employing mul
 
 ## Setup and Execution
 2. Configure your environment with a GitHub Access Token in the `.env` file.
-3. List the GitHub repositories you wish to analyze in a text file.
-4. Execute the script using: `python main.py`
+3. List the GitHub repositories you wish to analyze in the repo_links_list.txt text file.
+4. Execute the main.py script
 
+## Contribution:
+I welcome contributions from anyone who wants to help improve this tool. If you are interested in contributing, please fork this repository and make your changes. Then submit a pull request with a clear description of your changes.
+If you have any questions or suggestions about contributing, please feel free to contact me.
 
 ## Disclaimer:
 
