@@ -27,21 +27,22 @@ headers = {'Authorization': f'Bearer {GITHUB_ACCESS_TOKEN}'}
 
 # Variables to change:
 SIMILAR_USERS_SUSPICIOUS_PERCENTAGE = 20  # Threshold for similar user percentage
-SUSPICIOUS_STAR_PERCENTAGE = 0.7  # 70% threshold
-SUSPICIOUS_TIME_WINDOW_HOURS = 12  # Time window to analyze star patterns
+SUSPICIOUS_STAR_PERCENTAGE = 0.6  # 60% threshold
+SUSPICIOUS_TIME_WINDOW_HOURS = 24  # Time window to analyze star patterns
 
 
 def identify_commonly_starred_repositories(similar_users_logins):
+    """
+     Identify repositories that are commonly starred by a list of users.
+    """
     all_starred_repos_of_similar_users = []
     for user_login in similar_users_logins:
         # Fetch repositories starred by each user
         starred_repos_for_user = fetch_repositories_starred_by_user(user_login)
         all_starred_repos_of_similar_users.extend(starred_repos_for_user)
 
-    # Count how many times each repository was starred
     repo_counts = Counter(all_starred_repos_of_similar_users)
 
-    # Filter and return repositories that were starred more than once
     common_starred_repos = {}
     for repo, count in repo_counts.items():
         if count > 1:
@@ -109,12 +110,11 @@ def fetch_stargazers_for_repository(owner, repo):
 
 
 def analyze_star_patterns(repo, stargazers):
+
     if not stargazers:
         return False
 
     starTimestamps = sorted([datetime.datetime.fromisoformat(star[1].rstrip('Z')) for star in stargazers])
-    # first_star_time = starTimestamps[0]  # uncomment if you want to know the differance between first and last star
-    # last_star_time = starTimestamps[-1]
 
     time_window = datetime.timedelta(hours=SUSPICIOUS_TIME_WINDOW_HOURS)
     max_stars_in_time_window = 0
@@ -166,7 +166,6 @@ def fetch_user_profile_details(username):
 
 
 def check_for_user_similarities(repo, stargazers, total_stargazers):
-
     total_similar_users = 0
     all_stargazers_details = {}
     similar_users_details = []
@@ -241,7 +240,8 @@ def is_repo_suspicious(repo):
             check_for_user_similarities(repo, stargazers, total_stargazers)
         else:
             suspicious_logger.info(f"✅ Repository {repo} passed check for suspicious stars activity, where less than {threshold_percentage}% of stars were given within a 12 hour period!\n")
-
+    if stargazers_count < 1000:
+        check_for_user_similarities(repo, stargazers, total_stargazers)
 
 def get_list_of_repos(filename):
     try:
